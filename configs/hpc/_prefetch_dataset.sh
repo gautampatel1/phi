@@ -15,12 +15,13 @@ REPO_ID="${1:?usage: _prefetch_dataset.sh <hf_repo_id>}"
 PROJECT=/scratch/$USER/phi
 
 export PYTHONNOUSERSITE=1
-export http_proxy=http://10.99.0.130:3128
-export https_proxy=http://10.99.0.130:3128
+for _s in "${PHI_SITE:-}" "${PROJECT:-}/repo/configs/hpc/site.sh" "/scratch/$USER/phi/repo/configs/hpc/site.sh" "$HOME/phi/configs/hpc/site.sh"; do [ -n "$_s" ] && [ -f "$_s" ] && { . "$_s"; break; }; done
+command -v phi_load_conda >/dev/null || { echo "FATAL: configs/hpc/site.sh not found. Sync the repo, or set PHI_SITE=/path/to/site.sh" >&2; exit 1; }
+phi_set_proxy   # site.sh: probes; proxy on Northeastern, none on AICR
 export HF_HOME=$PROJECT/hf
 export HF_LEROBOT_HOME=$PROJECT/lerobot-data
 
-module load anaconda3/2024.06
+phi_load_conda  # site.sh: anaconda3 on Northeastern, conda/latest on AICR
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$PROJECT/envs/lerobot"
 

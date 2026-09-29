@@ -48,7 +48,9 @@ export PYTHONNOUSERSITE=1
 export HF_HOME=$SCRATCH/.cache/huggingface
 export PYTHONPATH=$HOME/phi/src:${PYTHONPATH:-}
 
-module load anaconda3/2024.06 2>/dev/null || true
+for _s in "${PHI_SITE:-}" "${PROJECT:-}/repo/configs/hpc/site.sh" "/scratch/$USER/phi/repo/configs/hpc/site.sh" "$HOME/phi/configs/hpc/site.sh"; do [ -n "$_s" ] && [ -f "$_s" ] && { . "$_s"; break; }; done
+command -v phi_load_conda >/dev/null || { echo "FATAL: configs/hpc/site.sh not found. Sync the repo, or set PHI_SITE=/path/to/site.sh" >&2; exit 1; }
+phi_load_conda  # site.sh: anaconda3 on Northeastern, conda/latest on AICR
 export PATH="$ENV_PREFIX/bin:$PATH"
 
 OUT=$RESULTS/$RUN

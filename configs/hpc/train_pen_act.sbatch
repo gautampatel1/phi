@@ -55,8 +55,8 @@
 #SBATCH --mem=64G
 #SBATCH --time=08:00:00
 #SBATCH --array=0-1
-#SBATCH --output=/home/gupta.yashv/phi/logs/pen-%A_%a.out
-#SBATCH --error=/home/gupta.yashv/phi/logs/pen-%A_%a.err
+#SBATCH --output=/home/%u/phi/logs/pen-%A_%a.out
+#SBATCH --error=/home/%u/phi/logs/pen-%A_%a.err
 
 set -euo pipefail
 
@@ -65,9 +65,9 @@ set -euo pipefail
 # video cache and the checkpoints live on /scratch, because $HOME has an
 # unreportable per-user quota that is already ~77 GB full and killed build
 # 9989313 with "Disk quota exceeded". Rebuilding the env is one sbatch, ~10 min.
-REAL_HOME=/home/gupta.yashv
+REAL_HOME=$HOME
 PHI=$REAL_HOME/phi                                  # scripts + logs (small)
-SCRATCH=/scratch/gupta.yashv
+SCRATCH=/scratch/$USER
 ENV_PREFIX=$SCRATCH/envs/phi-cuda                   # ~11 GB
 RESULTS=$SCRATCH/phi-results                        # checkpoints
 
@@ -120,7 +120,9 @@ if [ -d "$OUT" ] && [ -z "$(find "$OUT" -name '*.safetensors' -print -quit 2>/de
   rm -rf "$OUT"
 fi
 
-module load anaconda3/2024.06 2>/dev/null || true
+for _s in "${PHI_SITE:-}" "${PROJECT:-}/repo/configs/hpc/site.sh" "/scratch/$USER/phi/repo/configs/hpc/site.sh" "$HOME/phi/configs/hpc/site.sh"; do [ -n "$_s" ] && [ -f "$_s" ] && { . "$_s"; break; }; done
+command -v phi_load_conda >/dev/null || { echo "FATAL: configs/hpc/site.sh not found. Sync the repo, or set PHI_SITE=/path/to/site.sh" >&2; exit 1; }
+phi_load_conda  # site.sh: anaconda3 on Northeastern, conda/latest on AICR
 export PATH="$ENV_PREFIX/bin:$PATH"
 
 echo "──────────────────────────────────────────────────────────────"

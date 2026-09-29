@@ -15,12 +15,13 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=01:00:00
-#SBATCH --output=/scratch/gupta.yashv/phi/logs/prefetch-%j.out
-#SBATCH --error=/scratch/gupta.yashv/phi/logs/prefetch-%j.err
+#SBATCH --output=/scratch/%u/phi/logs/prefetch-%j.out
+#SBATCH --error=/scratch/%u/phi/logs/prefetch-%j.err
 
 set -uo pipefail
 PROJECT=/scratch/$USER/phi
-REPO_ID=BrutalCaesar/phi_so101_8bin_v1
+# Competition dataset by default; override with REPO_ID=... sbatch ...
+REPO_ID=${REPO_ID:-BrutalCaesar/phi_so101_cubes_cylinder_v1}
 
 # compute nodes have no direct route out
 # 🚨 A stale torch in ~/.local/lib/python3.12/site-packages shadows the conda env
@@ -28,13 +29,14 @@ REPO_ID=BrutalCaesar/phi_so101_8bin_v1
 # open shared object file`. Every Φ job on Explorer must set this.
 export PYTHONNOUSERSITE=1
 
-export http_proxy=http://10.99.0.130:3128
-export https_proxy=http://10.99.0.130:3128
+for _s in "${PHI_SITE:-}" "${PROJECT:-}/repo/configs/hpc/site.sh" "/scratch/$USER/phi/repo/configs/hpc/site.sh" "$HOME/phi/configs/hpc/site.sh"; do [ -n "$_s" ] && [ -f "$_s" ] && { . "$_s"; break; }; done
+command -v phi_load_conda >/dev/null || { echo "FATAL: configs/hpc/site.sh not found. Sync the repo, or set PHI_SITE=/path/to/site.sh" >&2; exit 1; }
+phi_set_proxy   # site.sh: probes; proxy on Northeastern, none on AICR
 export HF_HOME=$PROJECT/hf
 export HF_LEROBOT_HOME=$PROJECT/lerobot-data      # every job must export this identically
 mkdir -p "$HF_HOME" "$HF_LEROBOT_HOME"
 
-module load anaconda3/2024.06
+phi_load_conda  # site.sh: anaconda3 on Northeastern, conda/latest on AICR
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$PROJECT/envs/lerobot"
 
@@ -55,9 +57,18 @@ m = ds.meta
 print(f"OK  episodes={m.total_episodes}  frames={m.total_frames}  fps={m.fps}")
 print(f"    revision={m.revision}  robot={m.robot_type}")
 print(f"    cameras={m.camera_keys}")
-assert m.total_episodes == 119, f"expected 119 episodes, got {m.total_episodes}"
-assert m.total_frames == 72518, f"expected 72518 frames, got {m.total_frames}"
-print("    counts match the dataset card")
+# Counts are per-DATASET, so they cannot be hardcoded here: this script is
+# parameterised by REPO_ID. 119/72518 belong to 8bin_v1 and fired a false
+# rc=1 on a perfectly good cubes_cylinder download (120/66,873).
+# Opt in by passing the numbers you expect:
+#   EXPECT_EPISODES=120 EXPECT_FRAMES=66873 sbatch ...
+import os
+for key, got in (("EXPECT_EPISODES", m.total_episodes),
+                 ("EXPECT_FRAMES",   m.total_frames)):
+    want = os.environ.get(key)
+    if want:
+        assert got == int(want), f"{key}: expected {want}, got {got}"
+        print(f"    {key} ok ({got})")
 PY
 rc=$?
 

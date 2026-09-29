@@ -19,7 +19,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-REMOTE=explorer:/scratch/gupta.yashv/phi/repo/
+# Destination follows YOU, not the author. `explorer` is an ssh alias and it
+# points at a DIFFERENT cluster for different people (Northeastern vs AICR),
+# so a hardcoded /scratch/<someone> pushes your code into their account.
+REMOTE="${PHI_REMOTE:-explorer:/scratch/$USER/phi/repo/}"
 COMMON=(-az --exclude='.git' --exclude='__pycache__' --exclude='._*' --exclude='.DS_Store')
 
 if [ "${1:-push}" = pull ]; then

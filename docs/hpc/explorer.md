@@ -2,6 +2,44 @@
 
 Everything below was hit and measured on 2026-08-04 getting ACT training up. Scripts live in [`configs/hpc/`](../../configs/hpc/). Read this before writing a new job.
 
+## ⚠️ Two different clusters answer to `ssh explorer`
+
+`explorer` is an alias in each person's own `~/.ssh/config`, and it does not point
+at the same machine for everyone.
+
+| | Northeastern Explorer (`explorer-01`) | AICR |
+|---|---|---|
+| partitions | `gpu`, `short`, `courses-gpu` | `cpu`, `rtx-batch`, `b200-batch`, `b200-fullnode`, `*-devel`, `preemptable` |
+| GPUs | v100 / a100 / h200 / t4 | rtx_pro_6000 / b200 |
+| modules | Environment Modules 5.3 (`anaconda3/2024.06`) | Lmod (`conda/latest`) |
+| compute nodes | **no route to the internet** | direct internet |
+
+Everything in `configs/hpc/` was written against the first one. On 2026-09-28 Tavish
+and Faisal ran the competition pipeline on the second and hit six separate failures,
+none of them about the data or the model — all baked-in assumptions.
+
+**Do not sed the scripts to your cluster's values.** That breaks the other one, where
+every existing Φ checkpoint lives. [`configs/hpc/site.sh`](../../configs/hpc/site.sh)
+asks SLURM and the module system what exists, so the same code runs on both.
+
+**Submit through the wrapper**, which supplies this cluster's partition and GPU type:
+
+```bash
+./configs/hpc/submit.sh configs/hpc/build_env.sbatch
+./configs/hpc/submit.sh configs/hpc/train_cubes_cylinder.sbatch
+```
+
+`#SBATCH` directives are parsed before any shell runs, so they cannot read `$USER` or
+a config file — that is exactly why the partition and the log paths got hardcoded.
+Flags passed to `sbatch` on the command line override the directives in the file, so
+the file keeps a sensible default and the wrapper supplies the truth. Log paths now
+use SLURM's `%u`, which expands to your username with no edit at all.
+
+A missing log directory is the nastiest failure in this whole area: the job dies
+instantly with `ExitCode 0:53`, writes no log anywhere, and simply vanishes from
+`squeue`. `submit.sh` reads each script's own `--output`/`--error` and creates the
+directory first.
+
 ## Layout
 
 ```
@@ -68,7 +106,7 @@ Pin **cu126** — works on 545 via minor-version compatibility *and* on any newe
 export PYTHONNOUSERSITE=1
 ```
 
-**5. Compute nodes have no internet.** Proxy is `http://10.99.0.130:3128`. conda reads it from `.condarc`; **pip does not** — export `http_proxy`/`https_proxy` explicitly.
+**5. Compute nodes have no internet — on Northeastern.** Proxy is `http://10.99.0.130:3128`. conda reads it from `.condarc`; **pip does not**. AICR nodes route directly and that address does not exist there, so setting it turns every download into a `ConnectTimeoutError`. `phi_set_proxy` in [`site.sh`](../../configs/hpc/site.sh) probes rather than assumes — a wrong proxy and a missing proxy both present as a hang, so guessing is not safe either way.
 
 ## Conda
 

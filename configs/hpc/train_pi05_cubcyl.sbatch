@@ -46,14 +46,14 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
 #SBATCH --time=08:00:00
-#SBATCH --output=/home/gupta.yashv/phi/logs/pi05-%j.out
-#SBATCH --error=/home/gupta.yashv/phi/logs/pi05-%j.err
+#SBATCH --output=/home/%u/phi/logs/pi05-%j.out
+#SBATCH --error=/home/%u/phi/logs/pi05-%j.err
 
 set -euo pipefail
 
-REAL_HOME=/home/gupta.yashv
+REAL_HOME=$HOME
 PHI=$REAL_HOME/phi
-SCRATCH=/scratch/gupta.yashv
+SCRATCH=/scratch/$USER
 ENV_PREFIX=$SCRATCH/envs/phi-cuda
 RESULTS=$SCRATCH/phi-results
 
@@ -66,7 +66,9 @@ export WANDB_DIR=$SCRATCH/wandb
 export WANDB_CACHE_DIR=$SCRATCH/.cache/wandb
 mkdir -p "$PHI/logs" "$WANDB_DIR" "$RESULTS"
 
-module load anaconda3/2024.06 2>/dev/null || true
+for _s in "${PHI_SITE:-}" "${PROJECT:-}/repo/configs/hpc/site.sh" "/scratch/$USER/phi/repo/configs/hpc/site.sh" "$HOME/phi/configs/hpc/site.sh"; do [ -n "$_s" ] && [ -f "$_s" ] && { . "$_s"; break; }; done
+command -v phi_load_conda >/dev/null || { echo "FATAL: configs/hpc/site.sh not found. Sync the repo, or set PHI_SITE=/path/to/site.sh" >&2; exit 1; }
+phi_load_conda  # site.sh: anaconda3 on Northeastern, conda/latest on AICR
 export PATH="$ENV_PREFIX/bin:$PATH"
 
 # π₀ needs PaliGemma from transformers; lerobot's [pi] extra is transformers+scipy.

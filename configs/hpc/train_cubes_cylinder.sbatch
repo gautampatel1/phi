@@ -25,8 +25,8 @@
 #SBATCH --mem=64G
 #SBATCH --time=04:00:00
 #SBATCH --array=0-1
-#SBATCH --output=/scratch/gupta.yashv/phi/logs/cubcyl-%A_%a.out
-#SBATCH --error=/scratch/gupta.yashv/phi/logs/cubcyl-%A_%a.err
+#SBATCH --output=/scratch/%u/phi/logs/cubcyl-%A_%a.out
+#SBATCH --error=/scratch/%u/phi/logs/cubcyl-%A_%a.err
 
 set -uo pipefail
 PROJECT=/scratch/$USER/phi
@@ -111,15 +111,16 @@ PY
 # `libnvJitLink.so.12`. Every Φ job on Explorer must set this.
 export PYTHONNOUSERSITE=1
 
-export http_proxy=http://10.99.0.130:3128
-export https_proxy=http://10.99.0.130:3128
+for _s in "${PHI_SITE:-}" "${PROJECT:-}/repo/configs/hpc/site.sh" "/scratch/$USER/phi/repo/configs/hpc/site.sh" "$HOME/phi/configs/hpc/site.sh"; do [ -n "$_s" ] && [ -f "$_s" ] && { . "$_s"; break; }; done
+command -v phi_load_conda >/dev/null || { echo "FATAL: configs/hpc/site.sh not found. Sync the repo, or set PHI_SITE=/path/to/site.sh" >&2; exit 1; }
+phi_set_proxy   # site.sh: probes; proxy on Northeastern, none on AICR
 export HF_HOME=$PROJECT/hf
 export HF_LEROBOT_HOME=$PROJECT/lerobot-data
 export WANDB_DIR=$PROJECT/wandb
 export WANDB_CACHE_DIR=$PROJECT/wandb/cache
 mkdir -p "$WANDB_DIR" "$WANDB_CACHE_DIR" "$PROJECT/results"
 
-module load anaconda3/2024.06
+phi_load_conda  # site.sh: anaconda3 on Northeastern, conda/latest on AICR
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$PROJECT/envs/lerobot"
 
