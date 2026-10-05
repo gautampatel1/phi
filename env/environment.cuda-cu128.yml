@@ -1,0 +1,28 @@
+# Φ — Linux/CUDA training box with an RTX 50-series GPU (Blackwell, sm_120), incl. WSL2.
+# Same as environment.cuda.yml except the cu128 index and `ffmpeg<9`. Use THIS one when
+# `python -c "import torch; print(torch.cuda.is_available())"` says False on a 50-series
+# card under environment.cuda.yml: cu126 installs cleanly but ships no sm_120 kernels.
+#
+#   conda env create -f env/environment.cuda-cu128.yml
+#   conda activate phi
+#
+# Two more things measured on 2026-09-29 (RTX 5060 Ti, WSL2 Ubuntu 26.04, driver 581.95):
+#   • torchcodec from the cu128 index needs libnppicc and fails to import. The plain PyPI
+#     build decodes fine and is what the loaders use:
+#       pip install --index-url https://pypi.org/simple --force-reinstall --no-deps torchcodec==0.11.1
+#   • conda ≥ 26 refuses to run while `defaults` is in the channel list (Anaconda ToS);
+#     `nodefaults` below plus `conda config --system --remove channels defaults` fixes it
+#     without accepting anything.
+# Full notes: experiments/2026-09-29_act-cubcyl-60k-vs-resume-wsl.md
+name: phi
+channels: [conda-forge, nodefaults]
+dependencies:
+  - python=3.12
+  - "ffmpeg<9"          # torchcodec 0.11 supports FFmpeg 4-8; FFmpeg 9 is rejected at import
+  - pip
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu128
+      - "torch==2.11.0"
+      - "torchvision==0.26.0"
+      - "lerobot[training,feetech,core_scripts]==0.6.0"
+      - "lerobot[smolvla]==0.6.0"
