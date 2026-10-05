@@ -2,7 +2,7 @@
 
     python -m phi.eval.loss_by_checkpoint \
         --run /scratch/$USER/phi-results/pi05_cubcyl_lang \
-        --max-batches 40 --out outputs/pi05_cubcyl_ckpts.csv
+        --out outputs/pi05_cubcyl_ckpts.csv
 
 WHY THIS EXISTS SEPARATELY FROM act_loss_by_horizon
 ---------------------------------------------------
@@ -17,6 +17,20 @@ exactly one eval_loss was recorded.
 Every checkpoint carries its own train_config.json, and they all came from the
 same run, so the holdout episodes are identical across them by construction. No
 re-splitting, nothing to keep in sync.
+
+Runs trained with an explicit `--dataset.episodes` list have no eval_split and
+therefore no holdout of their own. Pass the held-out episodes by hand:
+
+    python -m phi.eval.loss_by_checkpoint --run outputs/train/act_cubcyl_poshold_60k \
+        --eval-episodes 0,1,2,3,4,20,21,22,23,24 --max-batches 0
+
+🚨 `--max-batches N` USED TO SCORE A PREFIX, NOT A SAMPLE
+The loader is unshuffled, so capping the batch count scored the FIRST 8N frames
+of the holdout — at the old default of 40 that was 320 frames, less than one
+episode. On act_cubcyl_60k (2026-09-29) a 100-batch prefix ranked step 40,000
+best; the whole holdout ranked 60,000 best, in agreement with lerobot's logged
+eval_loss. The cap now takes evenly spaced frames across the whole holdout, and
+the default is the whole holdout. Experiment: experiments/2026-09-29_act-cubcyl-60k-vs-resume-wsl.md
 
 POLICY-AGNOSTIC BY CONSTRUCTION
 -------------------------------
@@ -51,7 +65,7 @@ def _checkpoints(run: Path) -> list[Path]:
     return sorted(out, key=lambda p: int(p.name))
 
 
-def _load(ckpt: Path, device: str):
+def _load(ckpt: Path, device: str, eval_episodes: list[int] | None = None):
     import draccus
     from lerobot.configs.train import TrainPipelineConfig
     from lerobot.datasets.factory import make_train_eval_datasets
@@ -62,9 +76,17 @@ def _load(ckpt: Path, device: str):
         cfg = draccus.load(TrainPipelineConfig, f)
 
     policy = get_policy_class(cfg.policy.type).from_pretrained(pm).to(device).eval()
-    _, eval_ds = make_train_eval_datasets(cfg)
+    if eval_episodes:
+        # An explicit holdout: load exactly those episodes through the same factory
+        # the trainer used, with no split applied. The caller is responsible for
+        # these NOT being in the run's `--dataset.episodes` list.
+        cfg.dataset.episodes = list(eval_episodes)
+        cfg.dataset.eval_split = 0.0
+        eval_ds, _ = make_train_eval_datasets(cfg)
+    else:
+        _, eval_ds = make_train_eval_datasets(cfg)
     if eval_ds is None:
-        raise SystemExit(f"{ckpt}: run has no eval split")
+        raise SystemExit(f"{ckpt}: run has no eval split — pass --eval-episodes")
 
     # 🚨 Load the processors FROM THE CHECKPOINT, not from the policy config. The
     #    saved preprocessor carries the rename_map; rebuilding it from scratch
@@ -79,19 +101,24 @@ def _load(ckpt: Path, device: str):
 
 
 @torch.no_grad()
-def score(ckpt: Path, horizon: int, batch_size: int, max_batches: int, device: str):
+def score(ckpt: Path, horizon: int, batch_size: int, max_batches: int, device: str,
+          eval_episodes: list[int] | None = None, num_workers: int = 4):
     from lerobot.utils.constants import ACTION
 
-    cfg, policy, ds, pre = _load(ckpt, device)
+    cfg, policy, ds, pre = _load(ckpt, device, eval_episodes)
     h = min(horizon, cfg.policy.chunk_size)
-    loader = torch.utils.data.DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=4)
+    if max_batches and max_batches * batch_size < len(ds):
+        # Evenly spaced frames over the WHOLE holdout, not the first 8N. Deterministic,
+        # so every checkpoint sees the identical subset and the comparison stays fair.
+        idx = torch.linspace(0, len(ds) - 1, max_batches * batch_size).round().long().unique()
+        ds = torch.utils.data.Subset(ds, idx.tolist())
+    loader = torch.utils.data.DataLoader(ds, batch_size=batch_size, shuffle=False,
+                                         num_workers=num_workers)
 
     tot = torch.zeros(h, dtype=torch.float64)
     cnt = torch.zeros(h, dtype=torch.float64)
 
-    for i, batch in enumerate(loader):
-        if max_batches and i >= max_batches:
-            break
+    for batch in loader:
         # The dataset yields uint8 images. VISUAL normalization is IDENTITY for
         # π₀.₅, so nothing downstream converts them and the vision tower would be
         # fed integers. Converting here is a no-op when they are already float.
@@ -123,21 +150,28 @@ def main() -> None:
     ap.add_argument("--run", type=Path, required=True, help="a run dir, or its checkpoints/ dir")
     ap.add_argument("--horizon", type=int, default=50)
     ap.add_argument("--batch-size", type=int, default=8)
-    ap.add_argument("--max-batches", type=int, default=40,
-                    help="cap batches per checkpoint (0 = whole holdout). The cap is "
-                         "identical across checkpoints, so comparisons stay fair.")
+    ap.add_argument("--max-batches", type=int, default=0,
+                    help="cap batches per checkpoint (0 = whole holdout, the default). A cap "
+                         "takes evenly spaced frames across the holdout; it is identical "
+                         "across checkpoints, so comparisons stay fair.")
+    ap.add_argument("--eval-episodes", type=lambda s: [int(x) for x in s.split(",") if x],
+                    help="comma-separated episode indices to score on, for runs trained with "
+                         "--dataset.episodes and no eval_split")
+    ap.add_argument("--num-workers", type=int, default=4)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--out", type=Path)
     args = ap.parse_args()
 
     ckpts = _checkpoints(args.run)
     print(f"\nscoring {len(ckpts)} checkpoints on the same holdout "
-          f"({args.max_batches or 'all'} batches x {args.batch_size})\n")
+          f"({args.max_batches or 'all'} batches x {args.batch_size}"
+          f"{', episodes ' + str(args.eval_episodes) if args.eval_episodes else ''})\n")
     print(f"  {'step':>8} {'mean L1':>10} {'first 10':>10} {'last 10':>10}")
 
     rows, summary = [], []
     for c in ckpts:
-        curve = score(c, args.horizon, args.batch_size, args.max_batches, args.device)
+        curve = score(c, args.horizon, args.batch_size, args.max_batches, args.device,
+                      args.eval_episodes, args.num_workers)
         mean = sum(curve) / len(curve)
         head = sum(curve[:10]) / min(10, len(curve))
         tail = sum(curve[-10:]) / min(10, len(curve))

@@ -82,11 +82,23 @@ one account — read them for what was tried, do not copy them.
 ### Choosing which checkpoint to submit
 
 ```bash
-python -m phi.eval.loss_by_checkpoint --run /scratch/$USER/phi-results/<RUN> --max-batches 40
+python -m phi.eval.loss_by_checkpoint --run /scratch/$USER/phi-results/<RUN> --batch-size 32
 ```
 
-Every checkpoint on the identical holdout. On our π₀.₅ run the best was 22,500 of 30,000 and
-the final one was 3.5% worse — deploying the last step would have been a measurable mistake.
+Every checkpoint on the identical holdout — the **whole** holdout. On our π₀.₅ run the best was
+22,500 of 30,000 and the final one was 3.5% worse — deploying the last step would have been a
+measurable mistake.
+
+🚨 **Do not cap it to save time unless you must.** Until 2026-10-05 `--max-batches` scored the
+*first* N batches of an unshuffled loader, i.e. one or two episodes, and the 40-batch default this
+page used to recommend picked the wrong checkpoint on `act_cubcyl_60k` — the prefix said step
+40,000, the whole holdout (and lerobot's own logged `eval_loss`) said 60,000. The cap now samples
+across the holdout and defaults to all of it; a full pass costs ~2.5 min per ACT checkpoint on an
+RTX 5060 Ti. See [experiments/2026-09-29](../../experiments/2026-09-29_act-cubcyl-60k-vs-resume-wsl.md).
+
+Runs trained with an explicit `--dataset.episodes` list have no `eval_split`; pass the held-out
+episodes with `--eval-episodes 0,1,2,...`. To see the same error **in degrees, per joint**, against
+a hold-still baseline, use `python -m phi.eval.check_holdout`.
 
 Held-out loss is still **not** success rate. [experiments/2026-08-12](../../experiments/2026-08-12_dp-recovery-encoder-ab.md)
 has a checkpoint whose loss rose 4× and matched a 100k-step model on the arm. Use the score to
