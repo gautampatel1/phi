@@ -183,5 +183,5 @@ Not uploaded, so there is no Hub id, no revision and no model card yet. Local co
 - [ ] Upload A/60,000 to the Hub and write its card in [`models/`](../models/).
 - [x] Commit the cu128 env spec (`env/environment.cuda-cu128.yml`) and the per-joint check (`phi.eval.check_holdout`).
 - [x] Make `loss_by_checkpoint` sample across the whole holdout and fix the `--max-batches 40` advice in [docs/training](../docs/training/README.md).
-- [ ] A holdout that covers all six blocks — **running**: [2026-10-05](2026-10-05_act-cubcyl-poshold-cvae-ab-wsl.md) uses the position split from [2026-08-06](2026-08-06_act-cubes-cylinder-splits.md), with and without the CVAE.
+- [x] A holdout that covers all six blocks — done in [2026-10-05](2026-10-05_act-cubcyl-poshold-cvae-ab-wsl.md) on the position split from [2026-08-06](2026-08-06_act-cubes-cylinder-splits.md), with and without the CVAE: 0.210 held out, CVAE 8% better.
 - [ ] One longer run (100k) to find where run A's held-out curve actually turns.
