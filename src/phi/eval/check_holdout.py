@@ -55,15 +55,21 @@ def check(ckpt: Path, device: str, batch_size: int, workers: int,
                                          num_workers=workers)
 
     d = len(names)
-    abs_phys = torch.zeros(h, d, dtype=torch.float64)   # policy, physical units
-    abs_norm = torch.zeros(h, d, dtype=torch.float64)   # policy, normalized
-    hold_phys = torch.zeros(h, d, dtype=torch.float64)  # hold-still baseline, physical
-    hold_norm = torch.zeros(h, d, dtype=torch.float64)
+    abs_norm = torch.zeros(h, d, dtype=torch.float64)   # policy error, normalized units
+    hold_phys = torch.zeros(h, d, dtype=torch.float64)  # hold-still baseline, physical units
     cnt = torch.zeros(h, dtype=torch.float64)
+    # Running sums to recover the per-dim normalization scale from the data itself:
+    # raw = norm * scale + shift, so scale = std(raw) / std(norm) over the SAME frames.
+    # Taken over the whole holdout, not one batch — a 32-frame batch at the start of
+    # an episode can have zero variance on a joint that has not moved yet (0/0 = nan).
+    n_s = torch.zeros(d, dtype=torch.float64)
+    s_raw = torch.zeros(d, dtype=torch.float64)
+    s_raw2 = torch.zeros(d, dtype=torch.float64)
+    s_nrm = torch.zeros(d, dtype=torch.float64)
+    s_nrm2 = torch.zeros(d, dtype=torch.float64)
     ep_sum: dict[int, float] = defaultdict(float)
     ep_cnt: dict[int, float] = defaultdict(float)
     ep_frames: dict[int, int] = defaultdict(int)
-    scale = None
 
     for batch in loader:
         raw_gt = batch[ACTION].double()                      # (B, h, d) physical
@@ -75,21 +81,18 @@ def check(ckpt: Path, device: str, batch_size: int, workers: int,
         pred = policy.predict_action_chunk(batch)[:, :h].double().cpu()
         gt = batch[ACTION][:, :h].double().cpu()
         keep = (~batch["action_is_pad"][:, :h]).double().cpu()   # (B, h)
-
-        if scale is None:
-            # Normalization is affine per dim (raw = norm * scale + shift), so the
-            # scale falls out of the data itself. No need to open the normalizer file.
-            m = keep.bool()
-            scale = torch.stack([raw_gt[..., j][m].std() / gt[..., j][m].std() for j in range(d)])
+        k3 = keep[..., None]
 
         e = (pred - gt).abs()                                # normalized
         hold = (raw_state[:, None, :] - raw_gt).abs()        # physical
-        k3 = keep[..., None]
         abs_norm += (e * k3).sum(0)
-        abs_phys += (e * scale * k3).sum(0)
         hold_phys += (hold * k3).sum(0)
-        hold_norm += (hold / scale * k3).sum(0)
         cnt += keep.sum(0)
+        n_s += keep.sum()
+        s_raw += (raw_gt * k3).sum((0, 1))
+        s_raw2 += (raw_gt.pow(2) * k3).sum((0, 1))
+        s_nrm += (gt * k3).sum((0, 1))
+        s_nrm2 += (gt.pow(2) * k3).sum((0, 1))
 
         per_sample = (e.mean(-1) * keep).sum(1)
         per_cnt = keep.sum(1)
@@ -98,8 +101,12 @@ def check(ckpt: Path, device: str, batch_size: int, workers: int,
             ep_cnt[ep_i] += per_cnt[i].item()
             ep_frames[ep_i] += 1
 
+    var_raw = s_raw2 / n_s - (s_raw / n_s) ** 2
+    var_nrm = s_nrm2 / n_s - (s_nrm / n_s) ** 2
+    scale = (var_raw / var_nrm).sqrt()                       # (d,)
     c = cnt.clamp(min=1)[:, None]
-    phys, norm, hp, hn = abs_phys / c, abs_norm / c, hold_phys / c, hold_norm / c
+    norm, hp = abs_norm / c, hold_phys / c
+    phys, hn = norm * scale, hp / scale
     out = {
         "checkpoint": str(ckpt),
         "holdout_frames": int(sum(ep_frames.values())),
